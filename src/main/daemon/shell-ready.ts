@@ -7,46 +7,60 @@ import {
   isPowerShellExecutableName
 } from '../powershell-osc133-bootstrap'
 import { getFishCodexShellLaunchPreflight } from '../pty/codex-shell-launch-preflight'
-import {
-  getFishShellReadyInitCommand,
-  ZSH_WRAPPER_DIR_MARKER_CONTENT,
-  ZSH_WRAPPER_DIR_MARKER_FILE
-} from '../shell-templates'
+import { getFishShellReadyInitCommand } from '../shell-templates'
 import {
   encodeShellStartupFeatures,
   SHELL_STARTUP_FEATURE_ENV,
   type ShellStartupFeature
 } from '../shell-startup-features'
+import {
+  markShellReadyWrapperRootInUse,
+  pruneStaleShellReadyWrapperRoots,
+  resolveShellReadyWrapperRoot
+} from '../shell-ready-wrapper-store'
 import { writeShellWrapperFiles } from '../shell-wrapper-file-writer'
+import { buildDaemonShellReadyWrapperFiles } from './daemon-shell-ready-wrapper-fileset'
 import {
   resolveInheritedZdotdir,
   resolveInheritedZshenvSourceDir
 } from '../zsh-wrapper-dir-ownership'
-import { buildZshStartupWrapperFiles } from '../zsh-startup-wrapper-builder'
 import { SHELL_READY_MARKER } from './daemon-shell-ready-marker'
-import { getDaemonBashShellReadyRcfileContent } from './daemon-bash-shell-ready-rcfile'
-import { getDaemonZshWrapperSpec } from './daemon-zsh-shell-ready-wrapper-spec'
 
 const ORCA_USER_DATA_PATH_ENV = 'ORCA_USER_DATA_PATH'
 
-let didEnsureShellReadyWrappers = false
+// Why keyed on the base dir rather than a bare flag: it mirrors the root cache,
+// so a re-pointed ORCA_USER_DATA_PATH sweeps its new base too.
+let prunedShellReadyWrapperBaseDir: string | null = null
 
-function getShellReadyWrapperRoot(): string {
+function getShellReadyWrapperBaseDir(): string {
   const userDataPath = process.env[ORCA_USER_DATA_PATH_ENV]
-  // Why: older/test launchers may not seed ORCA_USER_DATA_PATH. Keep a
-  // fallback so daemon startup does not fail before the parent can be fixed.
-  return join(userDataPath || tmpdir(), userDataPath ? 'shell-ready' : 'orca-shell-ready')
+  // Why a base dir of its own rather than the legacy `shell-ready/`: daemons of
+  // older builds still write that path unconditionally, so leaving it to them
+  // keeps this build's content-addressed trees out of their reach.
+  // Why the tmpdir fallback: older/test launchers may not seed
+  // ORCA_USER_DATA_PATH, and daemon startup must not fail before the parent can
+  // be fixed.
+  return join(userDataPath || tmpdir(), userDataPath ? 'shell-wrappers' : 'orca-shell-wrappers')
+}
+
+// Why memoized and keyed on the base dir: the digest is stable for a given base
+// dir, every shell launch asks for it, and the key self-invalidates if
+// ORCA_USER_DATA_PATH is ever re-pointed mid-process.
+let cachedShellReadyWrapperRoot: { baseDir: string; root: string } | null = null
+
+export function getShellReadyWrapperRoot(): string {
+  const baseDir = getShellReadyWrapperBaseDir()
+  if (cachedShellReadyWrapperRoot?.baseDir !== baseDir) {
+    cachedShellReadyWrapperRoot = {
+      baseDir,
+      root: resolveShellReadyWrapperRoot(baseDir, buildDaemonShellReadyWrapperFiles)
+    }
+  }
+  return cachedShellReadyWrapperRoot.root
 }
 
 function getRequiredShellReadyWrapperPaths(root = getShellReadyWrapperRoot()): string[] {
-  return [
-    join(root, 'zsh', '.zshenv'),
-    join(root, 'zsh', '.zprofile'),
-    join(root, 'zsh', '.zshrc'),
-    join(root, 'zsh', '.zlogin'),
-    join(root, 'zsh', ZSH_WRAPPER_DIR_MARKER_FILE),
-    join(root, 'bash', 'rcfile')
-  ]
+  return buildDaemonShellReadyWrapperFiles(root).map(([path]) => path)
 }
 
 // Why non-empty and not just present: a partial write leaves a zero-byte
@@ -66,30 +80,32 @@ function ensureShellReadyWrappers(): boolean {
   if (process.platform === 'win32') {
     return false
   }
-  if (didEnsureShellReadyWrappers && shellReadyWrappersExist()) {
-    return true
-  }
-  didEnsureShellReadyWrappers = true
-
   const root = getShellReadyWrapperRoot()
-  const zshDir = join(root, 'zsh')
-  const zsh = buildZshStartupWrapperFiles(getDaemonZshWrapperSpec(zshDir))
+  // Why existence alone decides, with no per-process flag: the root is keyed by
+  // a hash of the exact bytes we would write, so a tree that is present and
+  // non-empty is a tree this build wrote. Rewriting it would replace a live file
+  // on the terminal-spawn path for no gain.
+  if (!shellReadyWrappersExist()) {
+    const written = writeShellWrapperFiles(
+      buildDaemonShellReadyWrapperFiles(root),
+      '[daemon/shell-ready]'
+    )
+    if (!written || !shellReadyWrappersExist()) {
+      // Why no flag to reset: the next launch re-checks the files themselves, so
+      // a half-written tree is retried without any extra bookkeeping.
+      return false
+    }
+  }
 
-  const written = writeShellWrapperFiles(
-    [
-      [join(zshDir, '.zshenv'), zsh.zshenv],
-      [join(zshDir, '.zprofile'), zsh.zprofile],
-      [join(zshDir, '.zshrc'), zsh.zshrc],
-      [join(zshDir, '.zlogin'), zsh.zlogin],
-      [join(zshDir, ZSH_WRAPPER_DIR_MARKER_FILE), ZSH_WRAPPER_DIR_MARKER_CONTENT],
-      [join(root, 'bash', 'rcfile'), getDaemonBashShellReadyRcfileContent()]
-    ],
-    '[daemon/shell-ready]'
-  )
-  if (!written || !shellReadyWrappersExist()) {
-    // Why reset: the next launch retries instead of trusting a half-written tree.
-    didEnsureShellReadyWrappers = false
-    return false
+  // Why unconditional: the common path now writes nothing, and this stamp is the
+  // only thing telling a sibling build's pruner the tree still launches shells.
+  markShellReadyWrapperRootInUse(root)
+
+  // Why once per base dir: the sweep is process-startup work, not per-spawn work.
+  const baseDir = getShellReadyWrapperBaseDir()
+  if (prunedShellReadyWrapperBaseDir !== baseDir) {
+    prunedShellReadyWrapperBaseDir = baseDir
+    pruneStaleShellReadyWrapperRoots(baseDir, root)
   }
   return true
 }

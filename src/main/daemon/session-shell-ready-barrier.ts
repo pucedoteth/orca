@@ -188,6 +188,15 @@ export class SessionShellReadyBarrier {
     if (this._state !== 'pending') {
       return
     }
+    // Why log: this path costs every startup command the full timeout, and it
+    // used to fail silently -- a wrapper that never emits the marker looked
+    // identical to a slow shell. Name the shell so the next report can be
+    // diagnosed from the log alone.
+    console.warn(
+      `[Session] ${this.deps.sessionId}: shell-ready marker never arrived within ` +
+        `${this.deps.shellReadyTimeoutMs ?? SHELL_READY_TIMEOUT_MS}ms for shell ` +
+        `${this.deps.subprocess.shellPath ?? 'unknown'}; delivering the startup command blind.`
+    )
     this._state = 'timed_out'
     this.disposePromptReadinessProbe()
     this.releaseDeviceAttributes()

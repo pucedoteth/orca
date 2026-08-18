@@ -17,6 +17,8 @@ import {
   scanShellStartupOutput
 } from '../shell-startup-output-scanner'
 import { HeadlessEmulator } from './headless-emulator'
+// Why resolved rather than hardcoded: the wrapper tree is content-addressed.
+import { getShellReadyWrapperRoot } from './shell-ready'
 
 async function importFreshShellReady() {
   vi.resetModules()
@@ -226,7 +228,7 @@ describePosix('daemon shell-ready launch config', () => {
     const { getShellReadyLaunchConfig } = await importFreshShellReady()
 
     const config = getShellReadyLaunchConfig('/bin/bash')
-    const rcfile = join(userDataPath, 'shell-ready', 'bash', 'rcfile')
+    const rcfile = join(getShellReadyWrapperRoot(), 'bash', 'rcfile')
 
     expect(config.args).toEqual(['--rcfile', rcfile])
     expect(existsSync(rcfile)).toBe(true)
@@ -234,7 +236,7 @@ describePosix('daemon shell-ready launch config', () => {
 
   it('rewrites wrappers when a long-lived daemon finds a missing rcfile', async () => {
     const { getShellReadyLaunchConfig } = await importFreshShellReady()
-    const rcfile = join(userDataPath, 'shell-ready', 'bash', 'rcfile')
+    const rcfile = join(getShellReadyWrapperRoot(), 'bash', 'rcfile')
 
     getShellReadyLaunchConfig('/bin/bash')
     rmSync(rcfile)
@@ -250,8 +252,8 @@ describePosix('daemon shell-ready launch config', () => {
     const config = getShellReadyLaunchConfig('/bin/zsh')
 
     expect(config.args).toEqual(['-l'])
-    expect(config.env.ZDOTDIR).toBe(join(userDataPath, 'shell-ready', 'zsh'))
-    expect(existsSync(join(userDataPath, 'shell-ready', 'zsh', '.zshenv'))).toBe(true)
+    expect(config.env.ZDOTDIR).toBe(join(getShellReadyWrapperRoot(), 'zsh'))
+    expect(existsSync(join(getShellReadyWrapperRoot(), 'zsh', '.zshenv'))).toBe(true)
   })
 
   it('extends the startup barrier to fish so launch commands queue until the prompt', async () => {
@@ -492,10 +494,10 @@ describePosix('daemon shell-ready launch config', () => {
 
     getShellReadyLaunchConfig('/bin/zsh')
 
-    const zshenv = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zshenv'), 'utf8')
-    const zprofile = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zprofile'), 'utf8')
-    const zshrc = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zshrc'), 'utf8')
-    const zlogin = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zlogin'), 'utf8')
+    const zshenv = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zshenv'), 'utf8')
+    const zprofile = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zprofile'), 'utf8')
+    const zshrc = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zshrc'), 'utf8')
+    const zlogin = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zlogin'), 'utf8')
     expect(zshenv).toContain('__orca_resolve_inherited_config_dir "${ORCA_ORIG_ZDOTDIR:-$HOME}"')
     expect(zshenv).toContain('printf "\\033]777;orca-shell-start:%s\\007" "$$"')
     expect(zshenv).toContain('"$_orca_resolved_config_dir" == */shell-ready/zsh ]]; then')
@@ -519,7 +521,7 @@ describePosix('daemon shell-ready launch config', () => {
 
     // Why .zshenv: the widget registration lives in the epilogue, which .zlogin
     // (login) and .zshrc (non-login) both call exactly once.
-    const zshenv = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zshenv'), 'utf8')
+    const zshenv = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zshenv'), 'utf8')
     expect(zshenv).toContain('zle -N zle-line-init __orca_prompt_mark')
     expect(zshenv).toContain('__orca_prev_line_init_fn="${widgets[zle-line-init]#user:}"')
     expect(zshenv).toContain('printf "\\033]777;orca-shell-ready\\007"')
@@ -644,9 +646,9 @@ describePosix('daemon shell-ready launch config', () => {
 
     // Why one file: every restore now lives in the single epilogue in .zshenv,
     // which .zshrc and .zlogin each invoke on their own startup path.
-    const zshrc = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zshenv'), 'utf8')
+    const zshrc = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zshenv'), 'utf8')
     const zlogin = zshrc
-    const bashRc = readFileSync(join(userDataPath, 'shell-ready', 'bash', 'rcfile'), 'utf8')
+    const bashRc = readFileSync(join(getShellReadyWrapperRoot(), 'bash', 'rcfile'), 'utf8')
     const restoreLine =
       '[[ -n "${ORCA_OPENCODE_CONFIG_DIR:-}" ]] && export OPENCODE_CONFIG_DIR="${ORCA_OPENCODE_CONFIG_DIR}"'
     const mimoRestoreLine =
@@ -692,8 +694,8 @@ describePosix('daemon shell-ready launch config', () => {
     getShellReadyLaunchConfig('/bin/bash')
 
     // Why .zshenv: the zsh markers live in the epilogue, behind `markers`.
-    const zshrc = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zshenv'), 'utf8')
-    const bashRc = readFileSync(join(userDataPath, 'shell-ready', 'bash', 'rcfile'), 'utf8')
+    const zshrc = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zshenv'), 'utf8')
+    const bashRc = readFileSync(join(getShellReadyWrapperRoot(), 'bash', 'rcfile'), 'utf8')
 
     expect(bashRc).toContain('printf "\\033]133;D;%s\\007"')
     expect(bashRc).toContain('printf "\\033]777;orca-shell-start:%s\\007" "$$"')
@@ -912,7 +914,7 @@ describePosix('daemon shell-ready launch config', () => {
 
     getShellReadyLaunchConfig('/bin/zsh')
 
-    const zshenv = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zshenv'), 'utf8')
+    const zshenv = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zshenv'), 'utf8')
 
     expect(zshenv).toContain('unset ZDOTDIR')
     expect(zshenv).toContain('__orca_resolve_inherited_config_dir "${ORCA_ZSHENV')
@@ -928,7 +930,7 @@ describePosix('daemon shell-ready launch config', () => {
 
     getShellReadyLaunchConfig('/bin/zsh')
 
-    const zshenv = readFileSync(join(userDataPath, 'shell-ready', 'zsh', '.zshenv'), 'utf8')
+    const zshenv = readFileSync(join(getShellReadyWrapperRoot(), 'zsh', '.zshenv'), 'utf8')
 
     // Save spawn-env value before sourcing user .zshenv
     expect(zshenv).toContain('_orca_user_zdotdir="$_orca_resolved_config_dir"')
