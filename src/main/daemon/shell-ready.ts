@@ -13,11 +13,7 @@ import {
   SHELL_STARTUP_FEATURE_ENV,
   type ShellStartupFeature
 } from '../shell-startup-features'
-import {
-  markShellReadyWrapperRootInUse,
-  pruneStaleShellReadyWrapperRoots,
-  resolveShellReadyWrapperRoot
-} from '../shell-ready-wrapper-store'
+import { resolveShellWrapperRoot } from '../shell-wrapper-content-address'
 import { writeShellWrapperFiles } from '../shell-wrapper-file-writer'
 import { buildDaemonShellReadyWrapperFiles } from './daemon-shell-ready-wrapper-fileset'
 import {
@@ -27,10 +23,6 @@ import {
 import { SHELL_READY_MARKER } from './daemon-shell-ready-marker'
 
 const ORCA_USER_DATA_PATH_ENV = 'ORCA_USER_DATA_PATH'
-
-// Why keyed on the base dir rather than a bare flag: it mirrors the root cache,
-// so a re-pointed ORCA_USER_DATA_PATH sweeps its new base too.
-let prunedShellReadyWrapperBaseDir: string | null = null
 
 function getShellReadyWrapperBaseDir(): string {
   const userDataPath = process.env[ORCA_USER_DATA_PATH_ENV]
@@ -53,7 +45,7 @@ export function getShellReadyWrapperRoot(): string {
   if (cachedShellReadyWrapperRoot?.baseDir !== baseDir) {
     cachedShellReadyWrapperRoot = {
       baseDir,
-      root: resolveShellReadyWrapperRoot(baseDir, buildDaemonShellReadyWrapperFiles)
+      root: resolveShellWrapperRoot(baseDir, buildDaemonShellReadyWrapperFiles)
     }
   }
   return cachedShellReadyWrapperRoot.root
@@ -97,16 +89,6 @@ function ensureShellReadyWrappers(): boolean {
     }
   }
 
-  // Why unconditional: the common path now writes nothing, and this stamp is the
-  // only thing telling a sibling build's pruner the tree still launches shells.
-  markShellReadyWrapperRootInUse(root)
-
-  // Why once per base dir: the sweep is process-startup work, not per-spawn work.
-  const baseDir = getShellReadyWrapperBaseDir()
-  if (prunedShellReadyWrapperBaseDir !== baseDir) {
-    prunedShellReadyWrapperBaseDir = baseDir
-    pruneStaleShellReadyWrapperRoots(baseDir, root)
-  }
   return true
 }
 

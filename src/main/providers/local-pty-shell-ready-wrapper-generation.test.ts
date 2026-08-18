@@ -2,16 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  utimesSync,
-  writeFileSync
-} from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import {
   describePosix,
   importFreshLocalPtyShellReady,
@@ -49,32 +40,6 @@ describe('ensureShellReadyWrappersAt', () => {
       fresh.ensureShellReadyWrappersAt()
 
       expect(statSync(rcfile).mtimeMs).toBe(firstWrite)
-    } finally {
-      rmSync(userData, { recursive: true, force: true })
-    }
-  })
-
-  // Why: prune used to ride on the write branch. Now that a warm tree writes
-  // nothing, gating prune on writes would stop it running on every install whose
-  // tree already existed, letting stale trees accumulate forever.
-  it('still sweeps stale siblings on a process whose tree already exists', async () => {
-    const userData = mkdtempSync(join(tmpdir(), 'orca-warm-prune-'))
-    try {
-      setTestUserDataPath(userData)
-      const generation = await import('./local-pty-shell-ready-wrapper-generation')
-      const { getShellReadyWrapperBaseDir } = await import('./local-pty-shell-ready-wrapper-root')
-      generation.ensureShellReadyWrappersAt()
-
-      const stale = join(getShellReadyWrapperBaseDir(), '00112233445566aa')
-      mkdirSync(join(stale, 'shell-ready'), { recursive: true })
-      const longAgo = new Date(Date.now() - 400 * 24 * 60 * 60 * 1000)
-      utimesSync(stale, longAgo, longAgo)
-
-      vi.resetModules()
-      const fresh = await import('./local-pty-shell-ready-wrapper-generation')
-      fresh.ensureShellReadyWrappersAt()
-
-      expect(existsSync(stale)).toBe(false)
     } finally {
       rmSync(userData, { recursive: true, force: true })
     }
