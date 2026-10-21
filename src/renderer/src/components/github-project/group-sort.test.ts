@@ -364,6 +364,22 @@ describe('groupRows', () => {
     expect(groups.map((group) => group.label)).toEqual(['-10', '-2', '-1', '2', '10'])
   })
 
+  it('orders a cached non-number value after the numbers in a number field', () => {
+    // Why: a field retyped in GitHub can leave text values cached; they must not
+    // sort as if they were zero.
+    const view = { ...makeView(numberField), groupByFields: [numberField] }
+    const rows = [
+      makeRow('z', 0, { F_points: { kind: 'text', fieldId: 'F_points', text: 'z' } }),
+      makeRow('p5', 1, { F_points: { kind: 'number', fieldId: 'F_points', number: 5 } }),
+      makeRow('pneg', 2, { F_points: { kind: 'number', fieldId: 'F_points', number: -3 } }),
+      makeRow('a', 3, { F_points: { kind: 'text', fieldId: 'F_points', text: 'a' } })
+    ]
+
+    const groups = groupRows(makeTable(view, rows), rows)
+
+    expect(groups.map((group) => group.label)).toEqual(['-3', '5', 'a', 'z'])
+  })
+
   it('keeps the empty group last for a number field', () => {
     const view = { ...makeView(numberField), groupByFields: [numberField] }
     const rows = [

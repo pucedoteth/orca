@@ -94,7 +94,7 @@ function getFieldValueForGrouping(
     label,
     // Why: a number's label sorts as text — 10 before 2, and -10 between -1 and
     // -2 because the collator ignores the minus. compareSort already uses the value.
-    orderHint: value.kind === 'number' ? value.number : 0,
+    orderHint: value.kind === 'number' ? value.number : Number.NaN,
     iteration: null
   }
 }
@@ -161,11 +161,15 @@ export function groupRows(
       return a[1].orderHint - b[1].orderHint
     }
     if (groupField.dataType === 'NUMBER') {
-      const byValue = a[1].orderHint - b[1].orderHint
-      // Why: a cached value that is not a number (field retyped in GitHub) hints 0;
-      // fall through to the label rather than tie or return NaN.
-      if (byValue !== 0 && Number.isFinite(byValue)) {
-        return byValue
+      // Why: a cached non-number value (field retyped in GitHub) hints NaN; keep
+      // numbers first and order the rest by label so the order stays consistent.
+      const aIsNumber = Number.isFinite(a[1].orderHint)
+      const bIsNumber = Number.isFinite(b[1].orderHint)
+      if (aIsNumber !== bIsNumber) {
+        return aIsNumber ? -1 : 1
+      }
+      if (aIsNumber && a[1].orderHint !== b[1].orderHint) {
+        return a[1].orderHint - b[1].orderHint
       }
     }
     return a[1].label.localeCompare(b[1].label)
